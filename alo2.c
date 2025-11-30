@@ -17,6 +17,7 @@
 #define MAX_CHAVES (ORDEM_M - 1)    // chaves máximas em qualquer nó
 #define MIN_CHAVES (MAX_CHAVES / 2) 
 
+
 typedef struct idx_record {
     long long id;      
     long long offset;   
@@ -60,6 +61,165 @@ typedef struct {
 } SplitResultado;
 //cria arvore para funcoes
 ArvoreBMais indiceProdutos;
+
+//FUNCOES HASH
+
+#define TAM_HASH 96001 //Tamanho otimizado para o numero de registros na tabela, para arquivos diferentes tem que ser recalculado
+
+typedef struct Node {
+    long file_offset;      // Posição (offset) do registro no arquivo binário
+    struct Node* next;
+} Node;
+
+// 3. Struct da Tabela Hash Principal
+typedef struct {
+    Node** buckets;        // Array de ponteiros para Nodes (cabeças das listas encadeadas)
+    int size;              // Tamanho da tabela
+} HashTable;
+
+unsigned int hash_date(const char* date) {
+    unsigned int day, month, year;
+    
+    // Tenta extrair Dia, Mês e Ano.
+    if (sscanf(date, "%u/%u/%u", &day, &month, &year) != 3) {
+        return 0; // Retorna 0 em caso de erro.
+    }
+
+    // Combinação Polinomial Simples: Dá peso ao ano e espalha com o primo 31.
+    unsigned long hash_value = year;
+    hash_value = (hash_value * 31) + month;
+    hash_value = (hash_value * 31) + day;
+    
+    // Aplica o módulo para obter o índice.
+    return (unsigned int)(hash_value % TAM_HASH);
+}
+
+// Inicializa a tabela hash
+HashTable* create_hash_table(int size) {
+    HashTable* ht = (HashTable*)malloc(sizeof(HashTable));
+    if (ht == NULL) return NULL;
+
+    ht->size = size;
+    // calloc inicializa todos os ponteiros do array 'buckets' com NULL
+    ht->buckets = (Node**)calloc(size, sizeof(Node*)); 
+    if (ht->buckets == NULL) {
+        free(ht);
+        return NULL;
+    }
+    return ht;
+}
+
+void insert_into_index(HashTable* ht, const char* date, long offset) {
+    unsigned int index = hash_date(date);
+
+    // 1. Cria o novo nó
+    Node* new_node = (Node*)malloc(sizeof(Node));
+    if (new_node == NULL) return; 
+
+    new_node->file_offset = offset;
+    
+    // 2. Insere no início da lista encadeada (O(1))
+    new_node->next = ht->buckets[index]; 
+    ht->buckets[index] = new_node;
+}
+
+int populate_hash_table(const char* filename, HashTable* ht) {
+    FILE *file = fopen(filename, "rb");
+    if (file == NULL) {
+        perror("Erro ao abrir o arquivo binário para leitura do índice");
+        return 0;
+    }
+
+    Pedido pedido;
+    long current_offset;
+    int record_count = 0;
+
+    printf("Criando Indice hash...\n");
+
+    // Loop que lê o arquivo registro por registro
+    while (1) {
+        // 1. Salva o offset (posição inicial do registro) ANTES de ler
+        current_offset = ftell(file); 
+        
+        // 2. Tenta ler o próximo registro completo
+        if (fread(&pedido, sizeof(Pedido), 1, file) != 1) {
+            // Se fread não ler 1 registro (fim do arquivo ou erro), sai do loop
+            break; 
+        }
+
+        // 3. Insere o offset no índice usando a data como chave
+        insert_into_index(ht, pedido.data, current_offset);
+        record_count++;
+    }
+
+    fclose(file);
+    printf("Indexacao por hash concluída. Total de %d registros indexados.\n", record_count);
+
+    return record_count;
+}
+
+// Libera a memória alocada pela tabela hash
+void destroy_hash_table(HashTable* ht) {
+    if (ht == NULL) return;
+    for (int i = 0; i < ht->size; i++) {
+        Node* current = ht->buckets[i];
+        while (current != NULL) {
+            Node* temp = current;
+            current = current->next;
+            free(temp);
+        }
+    }
+    free(ht->buckets);
+    free(ht);
+}
+
+void search_by_date(HashTable* ht, const char* date, const char* filename) {
+    unsigned int index = hash_date(date);
+    Node* current = ht->buckets[index];
+    
+    if (current == NULL) {
+        printf("\nNenhum pedido encontrado para a data: %s\n", date);
+        return;
+    }
+
+    FILE* file = fopen(filename, "rb");
+    if (file == NULL) {
+        perror("\nErro ao abrir o arquivo binário para leitura");
+        return;
+    }
+
+    printf("\n--- Pedidos encontrados para a data %s (Bucket %u) ---\n", date, index);
+    Pedido p;
+    int count = 0;
+
+    // Percorre a lista de colisões (registros no mesmo bucket)
+    while (current != NULL) {
+        // Pula para a posição exata do registro no arquivo
+        fseek(file, current->file_offset, SEEK_SET); 
+        
+        // Lê o registro
+        if (fread(&p, sizeof(Pedido), 1, file) == 1) {
+            //  Confirma se a data do registro lido 
+            // realmente corresponde à data PESQUISADA (lida com falsas colisões de hash)
+            if (strcmp(p.data, date) == 0) {
+                printf("| ID Pedido: %lld | ID Produto: %lld | Data: %s | Offset: %ld |\n", 
+                       p.id, p.id_produto, p.data, current->file_offset);
+                count++;
+            }
+        } else {
+            fprintf(stderr, "Erro de leitura no offset: %ld\n", current->file_offset);
+        }
+        
+        current = current->next;
+    }
+
+    printf("Total de pedidos encontrados: %d\n", count);
+    fclose(file);
+}
+
+
+
+//FUNCOES B+
 
 NoBMais *criarNo(bool eh_folha) {
     NoBMais *n = (NoBMais*) malloc(sizeof(NoBMais));
@@ -1089,6 +1249,26 @@ void mostrarPedidos() {
 }
 
 int main(){
+
+    //inicializar hash
+
+    const char* filename = "pedidos.bin"; 
+    
+    HashTable* index_ht = create_hash_table(TAM_HASH);
+    if (index_ht == NULL) {
+        fprintf(stderr, "Erro ao alocar memória.\n");
+        return 1;
+    }
+
+    // 2. População da Tabela Hash a partir do arquivo
+    int indexed_count = populate_hash_table(filename, index_ht);
+    
+    if (indexed_count == 0) {
+        printf("Indexacao falhou ou o arquivo esta vazio. Verifique se o arquivo '%s' existe no diretório.\n", filename);
+        destroy_hash_table(index_ht);
+        return 1;
+    }
+
     indiceProdutos.raiz = NULL;
     int op;
     construirIndiceProdutos(); 
@@ -1185,6 +1365,7 @@ int main(){
             printf("2. Excluir\n");
             printf("3. Pesquisa Binaria\n");
             printf("4. Mostrar dados\n");
+            printf("5. Pesquisa por data(Hash)\n");
             printf("opcao: ");
             scanf("%d", &op_ped);
 
@@ -1217,7 +1398,19 @@ int main(){
                     // Usa a função de pesquisa otimizada com índice (Pesquisa Binária no índice + seek)
                     pesquisa_com_indice_pedido(pedido.id);
             }
+            else if(op_ped == 5){
+                
+                char data[11];
+                
+                printf("Digite a data desejada: DD/MMMM/AAAA");
+                scanf("%s",data);
+                
+                search_by_date(index_ht, data, "pedidos.bin");
+            }
         }
 
     } while (op != 0);
+
+
+    destroy_hash_table(index_ht);
 }
