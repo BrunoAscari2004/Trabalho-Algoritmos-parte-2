@@ -1,3 +1,4 @@
+#include <time.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -1253,26 +1254,38 @@ int main(){
     //inicializar hash
 
     const char* filename = "pedidos.bin"; 
-    
+
+    // mede tempo de criação do índice hash (create + populate)
+    clock_t hash_start = clock();
+
     HashTable* index_ht = create_hash_table(TAM_HASH);
     if (index_ht == NULL) {
         fprintf(stderr, "Erro ao alocar memória.\n");
         return 1;
     }
 
-    // 2. População da Tabela Hash a partir do arquivo
+    // População da tabela hash a partir do arquivo
     int indexed_count = populate_hash_table(filename, index_ht);
-    
+
+    clock_t hash_end = clock();
+    double hash_time = (double)(hash_end - hash_start) / CLOCKS_PER_SEC;
+    printf("\n[DESEMPENHO] Indice hash de pedidos criado em %.6f segundos. (%d registros indexados)\n",
+        hash_time, indexed_count);
+
     if (indexed_count == 0) {
         printf("Indexacao falhou ou o arquivo esta vazio. Verifique se o arquivo '%s' existe no diretório.\n", filename);
         destroy_hash_table(index_ht);
         return 1;
-    }
+    } 
 
     indiceProdutos.raiz = NULL;
     int op;
     construirIndiceProdutos(); 
     construirIndicePedidos();
+
+    // mede tempo de criação da árvore B+ em memória
+    clock_t b_start = clock();
+
     FILE *arq = fopen(PRODFILE, "rb");
     if (arq != NULL) {
         Produto prod;
@@ -1283,6 +1296,11 @@ int main(){
         }
         fclose(arq);
     }
+
+    clock_t b_end = clock();
+    double b_time = (double)(b_end - b_start) / CLOCKS_PER_SEC;
+    printf("[DESEMPENHO] Arvore B+ de produtos criada em %.6f segundos.\n", b_time);
+
     do{
         printf("\n------MENU PRINCIPAL------\n");
         printf("1. Produtos\n");
@@ -1332,12 +1350,22 @@ int main(){
                     printf("Atualizando Arvore B+ em memoria...\n");
                     recarregarArvore(&indiceProdutos);
                 }
-                else if(op_prod == 4)
-                    pesquisa_com_indice(produto.id); 
+                else if(op_prod == 4) {
+                    clock_t t_ini = clock();
+            
+                    long long offset = pesquisa_com_indice(produto.id);
+            
+                    clock_t t_fim = clock();
+                    double tempo = (double)(t_fim - t_ini) / CLOCKS_PER_SEC;
+                    printf("[DESEMPENHO] Pesquisa com indice de arquivo (produto) levou %.6f segundos.\n",
+                           tempo);
+                }
             }
             else if (op_prod == 5) {
                 printf("\nID do produto: ");
                 scanf("%lld",&produto.id);
+
+                clock_t t_ini = clock();
 
                 long long offset = buscarOffset(&indiceProdutos, produto.id);
                 if (offset != -1) {
@@ -1345,10 +1373,21 @@ int main(){
                     fseek(arq, offset, SEEK_SET);
                     Produto prod;
                     fread(&prod, sizeof(Produto), 1, arq);
-                    printf("%lld - %s - %.2f\n", prod.id, prod.categoria, prod.preco);
                     fclose(arq);
+
+                    clock_t t_fim = clock();
+                    double tempo = (double)(t_fim - t_ini) / CLOCKS_PER_SEC;
+
+                    printf("%lld - %s - %.2f\n", prod.id, prod.categoria, prod.preco);
+                    printf("[DESEMPENHO] Pesquisa via arvore B+ (produto) levou %.6f segundos.\n",
+                        tempo);
                 } else {
+                    clock_t t_fim = clock();
+                    double tempo = (double)(t_fim - t_ini) / CLOCKS_PER_SEC;
+
                     printf("Produto nao encontrado.\n");
+                    printf("[DESEMPENHO] Pesquisa via arvore B+ (produto) levou %.6f segundos.\n",
+                        tempo);
                 }
             }
         }
@@ -1388,24 +1427,52 @@ int main(){
                 mostrarPedidos();
             }
             else if (op_ped == 2 || op_ped == 3) {
-                // APENAS opções 2 (Excluir) e 3 (Pesquisa) pedem o ID do Pedido
                 printf("\nID do pedido: ");
                 scanf("%lld", &pedido.id);
-
-                if (op_ped == 2)
+            
+                if (op_ped == 2) {
                     removerPedido(pedido);
-                else if(op_ped == 3)
-                    // Usa a função de pesquisa otimizada com índice (Pesquisa Binária no índice + seek)
-                    pesquisa_com_indice_pedido(pedido.id);
-            }
+                } else if(op_ped == 3) {
+                    clock_t t_ini = clock();
+            
+                    long long offset = pesquisa_com_indice_pedido(pedido.id);
+            
+                    clock_t t_fim = clock();
+                    double tempo = (double)(t_fim - t_ini) / CLOCKS_PER_SEC;
+                    printf("[DESEMPENHO] Pesquisa com indice de arquivo (pedido) levou %.6f segundos.\n",
+                           tempo);
+                }
+            }else if (op_ped == 2 || op_ped == 3) {
+                printf("\nID do pedido: ");
+                scanf("%lld", &pedido.id);
+            
+                if (op_ped == 2) {
+                    removerPedido(pedido);
+                } else if(op_ped == 3) {
+                    clock_t t_ini = clock();
+            
+                    long long offset = pesquisa_com_indice_pedido(pedido.id);
+            
+                    clock_t t_fim = clock();
+                    double tempo = (double)(t_fim - t_ini) / CLOCKS_PER_SEC;
+                    printf("[DESEMPENHO] Pesquisa com indice de arquivo (pedido) levou %.6f segundos.\n",
+                           tempo);
+                }
+            } 
             else if(op_ped == 5){
-                
                 char data[11];
-                
-                printf("Digite a data desejada: DD/MMMM/AAAA");
-                scanf("%s",data);
-                
+            
+                printf("Digite a data desejada (DD/MM/AAAA): ");
+                scanf("%10s", data);
+            
+                clock_t t_ini = clock();
+            
                 search_by_date(index_ht, data, "pedidos.bin");
+            
+                clock_t t_fim = clock();
+                double tempo = (double)(t_fim - t_ini) / CLOCKS_PER_SEC;
+                printf("[DESEMPENHO] Pesquisa por data via hash (pedido) levou %.6f segundos.\n",
+                       tempo);
             }
         }
 
