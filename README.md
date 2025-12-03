@@ -123,6 +123,41 @@ o índice de arquivo foi usado para localizar um único pedido específico por I
 
 o hash em memória foi usado para listar todos os pedidos de uma determinada data, o que naturalmente envolve mais processamento e E/S quando a data concentra muitos registros.
 
+#### Tempo de recriação/atualização dos índices – Produtos
+
+Foram realizadas operações de inserção e remoção de produtos, medindo o impacto na
+recriação dos índices de arquivo e na atualização da árvore B+.
+
+| Operação                                      | Tempo índice de arquivo (s) | Atualização incremental B+ (s)  | Recriação completa B+ em memória (s) |
+| --------------------------------------------- | --------------------------- | ------------------------------- | ------------------------------------ |
+| Inserção de produto 1 (categoria **B**, 123)  | 0,021000                    | 0,000000                        | 0,004000                             |
+| Inserção de produto 2 (categoria **C**, 23)   | 0,032000                    | 0,000000                        | 0,003000                             |
+| Remoção de produto 1 (ID 2501331816804253948) | 0,024000                    | –                               | 0,004000                             |
+| Remoção de produto 2 (ID 2541962442884252323) | 0,021000                    | –                               | 0,003000                             |
+| **Média**                                     | **0,024500**                | **0,000000** (apenas inserções) | **0,003500**                         |
+
+Observações:
+
+- A **atualização incremental** da Árvore B+ após inserções ficou abaixo da resolução do `clock()` da linguagem C, aparecendo como `0.000000` segundos.
+- Após remoções de produtos, optou-se por **recarregar toda a árvore B+ a partir do arquivo**, pois os offsets dos registros mudam.
+
+---
+
+#### Tempo de recriação/atualização dos índices – Pedidos
+
+Foram realizadas inserções e remoções de pedidos, medindo o tempo de recriação do
+índice de arquivo e da tabela hash em memória.
+
+| Operação                                                       | Tempo índice de arquivo pedidos (s) | Tempo recriação índice hash (s) |
+| -------------------------------------------------------------- | ----------------------------------- | ------------------------------- |
+| Inserção de pedido 1 (data **01/01/2025**)                     | 0,026000                            | 0,045000                        |
+| Inserção de pedido 2 (data **01/01/2026**)                     | 0,026000                            | 0,043000                        |
+| Remoção de pedido 1 (ID 2719022379232658076 – data 30/11/2025) | 0,025000                            | 0,044000                        |
+| Remoção de pedido 2 (ID 2718818704694444655 – data 01/12/2021) | 0,030000                            | 0,044000                        |
+| **Média**                                                      | **0,026750**                        | **0,044000**                    |
+
+Em todos os casos de modificação em pedidos (inserções e remoções), o índice de arquivo (`pedidos.idx`) foi reconstruído e a tabela hash foi completamente **reindexada** a partir do arquivo `pedidos.bin`, garantindo consistência dos offsets.
+
 ### Conclusão geral
 
 Os experimentos mostraram que manter índices em memória (árvore B+ para produtos e hash para pedidos) traz um ganho real de desempenho em relação ao uso exclusivo de índices em arquivos. A árvore B+ em memória respondeu às consultas por ID de produto cerca de 2,6 vezes mais rápido do que o índice em arquivo, enquanto o hash por data conseguiu recuperar rapidamente todos os pedidos de uma data específica, mesmo em buckets cheios (como o de 01/12/2021, com 177 pedidos).
