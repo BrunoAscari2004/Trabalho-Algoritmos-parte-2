@@ -64,16 +64,6 @@ Para o conjunto de consultas em produtos, foram selecionados 5 IDs distintos e, 
 
 Na prática, isso ilustra a vantagem de manter estruturas de índice em memória para consultas intensivas: mesmo que ambos os métodos usem busca “guiada” (não varrem o arquivo inteiro), o custo de percorrer a B+ em memória é menor do que ler e processar o índice em disco.
 
-### Tempo de criação dos índices em memória
-
-Foram realizadas três execuções consecutivas do programa, medindo o tempo de criação
-dos índices em memória (hash para pedidos e árvore B+ para produtos).
-
-| Estrutura                       | Execução 1 (s) | Execução 2 (s) | Execução 3 (s) | Média (s) |
-| ------------------------------- | -------------- | -------------- | -------------- | --------- |
-| Hash em memória (Pedidos)       | 0,037063       | 0,037657       | 0,038664       | 0,037795  |
-| Árvore B+ em memória (Produtos) | 0,004468       | 0,004333       | 0,003794       | 0,004198  |
-
 ### Tempo de consulta – Produtos (busca por ID)
 
 Foram realizadas cinco consultas a produtos específicos, comparando o uso do índice de arquivo
@@ -132,3 +122,11 @@ Mesmo assim, ambos os métodos respondem em menos de 1 milissegundo nas consulta
 o índice de arquivo foi usado para localizar um único pedido específico por ID;
 
 o hash em memória foi usado para listar todos os pedidos de uma determinada data, o que naturalmente envolve mais processamento e E/S quando a data concentra muitos registros.
+
+### Conclusão geral
+
+Os experimentos mostraram que manter índices em memória (árvore B+ para produtos e hash para pedidos) traz um ganho real de desempenho em relação ao uso exclusivo de índices em arquivos. A árvore B+ em memória respondeu às consultas por ID de produto cerca de 2,6 vezes mais rápido do que o índice em arquivo, enquanto o hash por data conseguiu recuperar rapidamente todos os pedidos de uma data específica, mesmo em buckets cheios (como o de 01/12/2021, com 177 pedidos).
+
+Por outro lado, os índices em arquivo têm a vantagem de serem persistentes: não precisam ser reconstruídos a cada execução do programa e continuam válidos mesmo após o encerramento do processo. Já os índices em memória são voláteis e exigem um custo inicial de reconstrução sempre que o sistema é iniciado.
+
+No contexto do trabalho, a combinação das duas abordagens é interessante: o índice em arquivo garante a persistência e a organização básica dos dados, enquanto as estruturas em memória (hash e B+) funcionam como aceleradores para consultas específicas, explorando melhor o hardware disponível (RAM) para reduzir o tempo de resposta.
